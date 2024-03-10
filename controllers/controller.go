@@ -2,23 +2,48 @@ package controllers
 
 import (
 	"context"
+	"ecomm/database"
+	"ecomm/models"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 
+var UserCollection *mongo.Collection= database.UserData(database.Client, "Users");
+var ProductCollection *mongo.Collection= database.ProductData(database.Client, "Products");
 
-func HashPassword() string {
+var Validate = validator.New();
 
+
+func HashPassword(password string) string {
+bytes,err := bcrypt.GenerateFromPassword([]byte(password),14);
+if err != nil {
+	log.Panic(err);
 }
-
+return string(bytes);
+}
 
 func VerifyPassword(userPassword string, givenPassword string)(bool,string){
 
+	err := bcrypt.CompareHashAndPassword([]byte(givenPassword),[]byte(userPassword));
+
+	check := true;
+	msg := "";
+
+	if err != nil {
+		msg = "Login or Password is incorrect!";
+		check = false;
+	}
+
+	return check,msg;
 }
 
 func Signup() gin.HandlerFunc{
@@ -125,11 +150,95 @@ func Login() gin.HandlerFunc{
 }
 
 func ProductViewerAdmin() gin.HandlerFunc{
-
 }
 
 func SearchProduct() gin.HandlerFunc{
 
+	return func(ctx *gin.Context){
+
+		var ProductList []models.Product;
+		var c,cancel = context.WithTimeout(context.Background(),100*time.Second);
+
+		defer cancel();
+
+		cursor,err := ProductCollection.Find(c,bson.M{});
+
+		if err!= nil {
+			ctx.IndentedJSON(http.StatusInternalServerError,"something went wrong, please try again later!");
+			return;
+		}
+
+		err = cursor.All(c,&ProductList);
+
+		if err != nil {
+			log.Println(err);
+			ctx.AbortWithStatus(http.StatusInternalServerError);
+			return;
+		}
+
+		defer cursor.Close(c);
+
+		if err := cursor.Err(); err!= nil{
+			log.Println(err);
+			ctx.IndentedJSON(400,"invalid");
+			return;
+		}
+		defer cancel();
+		ctx.IndentedJSON(200,ProductList); 
+	}
 }
 
-func SearchProductByQuery() gin.HandlerFunc{}
+func SearchProductByQuery() gin.HandlerFunc{
+	return func(ctx *gin.Context) {
+		// CREATING A NEW VAR THAT WILL HOLDS ALL THE PRODUCTS!
+		var searchProducts []models.Product;
+	// GET THE NAME FROM THE QUERY AND STORED!!
+		queryParam := ctx.Query("name");
+
+		// IF YOU DO NOT HAVE QUERY!
+		if queryParam == "" {
+		    log.Println("query is empty!");
+			ctx.Header("Content-Type", "application/json");
+			ctx.JSON(http.StatusNotFound,gin.H{"Error": "query is empty!"});
+			ctx.Abort();
+			return;
+		}
+
+		// CREATING A CONTEXT TIME OUT!
+		var c,cancel = context.WithTimeout(context.Background(),100*time.Second);
+
+		defer cancel();
+
+		// FINDING THE DATA FROM THE DATABASE USING REGEX!
+		searchquerydb,err := ProductCollection.Find(c, bson.M{"product_name":bson.M{"$regex":queryParam}});
+
+		if err!= nil {
+		    ctx.IndentedJSON(404,"something went wrong while fetching the data!");
+			return;
+		}
+
+		// TRANSLATING DATA TO GO STRUCT!
+		err = searchquerydb.All(c,&searchProducts);
+
+
+		if err != nil {
+		    log.Println(err);
+			ctx.IndentedJSON(400,"invalid!");
+			return;
+		}
+
+		// WHEN ALL THE DATA IS TRANSFERED CLOSE THE CURSOR!
+		defer searchquerydb.Close(c);
+
+
+		if err := searchquerydb.Err(); err!= nil{
+		    log.Println(err);
+			ctx.IndentedJSON(400,"invalid request!");
+			return;
+		}
+		defer cancel();
+
+		// RETURNED DATA BACK!
+		ctx.IndentedJSON(200, searchProducts);
+	}
+}
