@@ -157,9 +157,7 @@ func GetItemFromCart() gin.HandlerFunc {
 			c.IndentedJSON(http.StatusOK,json["total"]);
 			c.IndentedJSON(200,filledCart.UserCart)
 		}
-
 		ctx.Done();
-
 	}
 }
 
